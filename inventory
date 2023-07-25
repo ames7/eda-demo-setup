@@ -8,7 +8,7 @@ rhel-1
 rhel-2
 eda-controller
 controller
-nodes
+broker
 
 [all:vars]
 ansible_user = rhel
