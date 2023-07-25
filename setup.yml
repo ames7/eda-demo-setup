@@ -1,5 +1,9 @@
 ---
-- hosts: podman
+###
+### Podman setup 
+###
+- name: Setup podman and services
+  hosts: podman
   gather_facts: no
   tasks:
     - name: Install EPEL
@@ -80,4 +84,189 @@
       ansible.builtin.command: 
         cmd: podman-compose up -d
         chdir: /tmp/eda-alertmanager/prometheus
+
+###
+### EDA Controller setup 
+###
+- name: Setup EDA Controller
+  hosts: eda-controller
+  tasks:
+
+    - name: Construct EDA Controller fqdn
+      set_fact:
+        eda_fqdn: "eda-controller-443-{{ lookup('env', '_SANDBOX_ID') }}.env.play.instruqt.com"
+  
+    - name: Construct Controller fqdn
+      set_fact:
+        controller_fqdn: "https://controller.{{ lookup('env', '_SANDBOX_ID') }}.instruqt.io"
+ 
+    - name: Replace IP with new fqdn in EDA_ALLOWED_HOSTS
+      ansible.builtin.replace:
+        path: /etc/ansible-automation-platform/eda/environment
+        regexp: '10\.128\.0\.25'
+        replace: "{{ eda_fqdn }}"
+      become: true
+
+    - name: Replace Controller fqdn
+      ansible.builtin.replace:
+        path: /etc/ansible-automation-platform/eda/environment
+        regexp: 'https://ansible.demoredhat.com'
+        replace: "{{ controller_fqdn }}"
+      become: true
+
+    - name: Restart eda controller service
+      ansible.builtin.systemd:
+        name: automation-eda-controller
+        state: restarted
+      become: true
+
+    - name: Adjust nginx config
+      ansible.builtin.replace:
+        path: /etc/nginx/conf.d/automation-eda-controller.conf
+        regexp: 'deny all;'
+        replace: 'allow all;'
+      become: true
+
+    - name: Restart nginx service
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted
+      become: true
+
+###
+### Automation Controller setup 
+###
+- name: Setup Controller 
+  hosts: contoller
+  collections:
+    - awx.awx
+  tasks:
+
+  - name: add rhel machine credential
+    awx.awx.credential:
+      name: 'rhel credential'
+      organization: Default
+      credential_type: Machine
+      controller_host: "https://{{ ansible_host }}"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+      inputs:
+        username: rhel
+        password: ansible123!
+
+  - name: add rhel inventory
+    awx.awx.inventory:
+      name: "rhel inventory"
+      description: "rhel servers in demo environment"
+      organization: "Default"
+      state: present
+      controller_host: "https://localhost"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+
+  - name: add hosts
+    awx.awx.host:
+      name: "{{ item }}"
+      description: "rhel host"
+      inventory: "rhel inventory"
+      state: present
+      enabled: true
+      controller_host: "https://localhost"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+    loop:
+      - rhel-1
+      - rhel-2
+
+  - name: Add group
+    awx.awx.group:
+      name: nodes
+      description: "rhel host group"
+      inventory: rhel inventory
+      hosts:
+        - rhel-1
+        - rhel-2
+      variables:
+        ansible_user: rhel
+      controller_host: "https://localhost"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+
+  - name: Add project
+    awx.awx.project:
+      name: "eda-project"
+      description: "EDA project"
+      organization: "Default"
+      scm_type: git
+      scm_url: http://gitea:3000/student/eda-project-basic
+      state: present
+      controller_host: "https://localhost"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+
+  - name: Post job template
+    awx.awx.job_template:
+      name: "Apply baseline"
+      job_type: "run"
+      organization: "Default"
+      inventory: "rhel inventory"
+      project: "eda-project"
+      playbook: "playbooks/alertmanager-baseline-config.yml"
+      execution_environment: "Default execution environment"
+      ask_variables_on_launch: true
+      ask_limit_on_launch: true
+      credentials:
+        - "rhel credential"
+      state: "present"
+      controller_host: "https://localhost"
+      controller_username: admin
+      controller_password: ansible123!
+      validate_certs: false
+
+###
+### RHEL nodes setup 
+###
+- name: Setup rhel nodes
+  hosts: nodes
+  become: true
+  tasks:
+    - name: Install epel-release
+      ansible.builtin.dnf:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        state: present
+
+    - name: Install packages
+      ansible.builtin.dnf:
+        name:
+          - git
+          - tmux
+          - podman-compose
+        state: present
+
+    - name: Clone eda-alertmanager repository
+      ansible.builtin.git:
+        repo: http://gitea:3000/student/eda-alertmanager
+        dest: /tmp/eda-alertmanager
+
+    - name: Start node_exporter services with podman-compose
+      ansible.builtin.command:
+        cmd: podman-compose up -d
+        chdir: /tmp/eda-alertmanager/node_exporter
+
+###
+### Kafka broker setup 
+###
+- name: Create Kafka topic
+  hosts: broker
+  gather_facts: no
+  tasks:
+    - name: Create eda-topic on Kafka
+      command:
+        cmd: kafka-topics --bootstrap-server broker:9092 --create --topic eda-topic
+
 ...
