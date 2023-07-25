@@ -1,0 +1,80 @@
+---
+- hosts: podman
+  gather_facts: no
+  tasks:
+    - name: Install EPEL
+      ansible.builtin.package:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        state: present
+      become: true
+
+    - name: Install required packages
+      ansible.builtin.package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - git
+        - tmux
+        - podman-compose
+      become: true
+
+    - name: Clone gitea
+      ansible.builtin.git:
+        repo: https://github.com/cloin/gitea-podman.git
+        dest: /tmp/gitea-podman
+
+    - name: Start gitea
+      ansible.builtin.command: 
+        cmd: podman-compose up -d
+        chdir: /tmp/gitea-podman
+
+    - name: Wait for gitea to start
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Create student user
+      ansible.builtin.shell:
+        cmd: podman exec -u git gitea /usr/local/bin/gitea admin user create --admin --username student --password learn_ansible --email student@example.com
+
+    - name: Create ansible user
+      ansible.builtin.shell:
+        cmd: podman exec -u git gitea /usr/local/bin/gitea admin user create --admin --username ansible --password learn_ansible --email ansible@example.com
+
+    - name: Migrate github projects to gitea
+      ansible.builtin.uri:
+        url: http://podman:3000/api/v1/repos/migrate
+        method: POST
+        body_format: json
+        body: {"clone_addr": "{{ item.url }}", "repo_name": "{{ item.name }}"}
+        headers:
+          Content-Type: "application/json"
+        user: student
+        password: learn_ansible
+        force_basic_auth: yes
+        validate_certs: no
+      loop:
+        - {name: 'eda-project', url: 'https://github.com/cloin/eda-project-basic.git'}
+        - {name: 'eda-alertmanager', url: 'https://github.com/cloin/eda-alertmanager.git'}
+
+    - name: Clone migrated project
+      ansible.builtin.git:
+        repo: http://podman:3000/student/eda-alertmanager.git
+        dest: /tmp/eda-alertmanager
+
+    - name: Start node_exporter and webhook services
+      ansible.builtin.command:
+        cmd: podman-compose up -d
+        chdir: "/tmp/eda-alertmanager/{{ item }}"
+      loop:
+        - node_exporter
+        - webhook
+
+    - name: Wait for services to start
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Start prometheus
+      ansible.builtin.command: 
+        cmd: podman-compose up -d
+        chdir: /tmp/eda-alertmanager/prometheus
+...
