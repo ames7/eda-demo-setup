@@ -18,7 +18,7 @@
         - podman-compose
       become: true
 
-    - name: Clone gitea
+    - name: Clone gitea podman-compose project
       ansible.builtin.git:
         repo: https://github.com/cloin/gitea-podman.git
         dest: /tmp/gitea-podman
@@ -33,15 +33,15 @@
       ansible.builtin.pause:
         seconds: 15
 
-    - name: Create student user
+    - name: Create gitea student user
       ansible.builtin.shell:
         cmd: podman exec -u git gitea /usr/local/bin/gitea admin user create --admin --username student --password learn_ansible --email student@example.com
 
-    - name: Create ansible user
+    - name: Create gitea ansible user
       ansible.builtin.shell:
         cmd: podman exec -u git gitea /usr/local/bin/gitea admin user create --admin --username ansible --password learn_ansible --email ansible@example.com
 
-    - name: Migrate github projects to gitea
+    - name: Migrate github projects to gitea student user
       ansible.builtin.uri:
         url: http://podman:3000/api/v1/repos/migrate
         method: POST
@@ -58,13 +58,13 @@
         - {name: 'eda-project', url: 'https://github.com/cloin/eda-project-basic.git'}
         - {name: 'eda-alertmanager', url: 'https://github.com/cloin/eda-alertmanager.git'}
 
-    - name: Clone migrated project
+    - name: Clone eda-alertmanager podman-compose from student on gitea
       ansible.builtin.git:
         repo: http://podman:3000/student/eda-alertmanager.git
         dest: /tmp/eda-alertmanager
         force: true
 
-    - name: Start node_exporter and webhook services
+    - name: Start node_exporter and webhook services with podman-compose
       ansible.builtin.command:
         cmd: podman-compose up -d
         chdir: "/tmp/eda-alertmanager/{{ item }}"
@@ -76,7 +76,7 @@
       ansible.builtin.pause:
         seconds: 15
 
-    - name: Start prometheus
+    - name: Start prometheus with podman-compose
       ansible.builtin.command: 
         cmd: podman-compose up -d
         chdir: /tmp/eda-alertmanager/prometheus
