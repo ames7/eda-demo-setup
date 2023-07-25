@@ -1,0 +1,15 @@
+[nodes]
+rhel-1
+rhel-2
+
+[all]
+podman
+rhel-1
+rhel-2
+eda-controller
+controller
+nodes
+
+[all:vars]
+ansible_user = rhel
+ansible_password = 
