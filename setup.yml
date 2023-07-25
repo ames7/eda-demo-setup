@@ -46,7 +46,7 @@
         method: POST
         body_format: json
         body: {"clone_addr": "{{ item.url }}", "repo_name": "{{ item.name }}"}
-        status_code: [201]
+        status_code: [201, 409]
         headers:
           Content-Type: "application/json"
         user: student
